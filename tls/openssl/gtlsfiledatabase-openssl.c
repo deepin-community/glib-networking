@@ -77,10 +77,10 @@ enum
 
 static void g_tls_file_database_openssl_file_database_interface_init (GTlsFileDatabaseInterface *iface);
 
-G_DEFINE_TYPE_WITH_CODE (GTlsFileDatabaseOpenssl, g_tls_file_database_openssl, G_TYPE_TLS_DATABASE_OPENSSL,
-                         G_IMPLEMENT_INTERFACE (G_TYPE_TLS_FILE_DATABASE,
-                                                g_tls_file_database_openssl_file_database_interface_init)
-                         )
+G_DEFINE_FINAL_TYPE_WITH_CODE (GTlsFileDatabaseOpenssl, g_tls_file_database_openssl, G_TYPE_TLS_DATABASE_OPENSSL,
+                               G_IMPLEMENT_INTERFACE (G_TYPE_TLS_FILE_DATABASE,
+                                                      g_tls_file_database_openssl_file_database_interface_init)
+                              )
 
 static GHashTable *
 bytes_multi_table_new (void)
@@ -450,10 +450,12 @@ g_tls_file_database_openssl_populate_trust_list (GTlsDatabaseOpenssl  *self,
 
   if (!X509_STORE_load_locations (store, file_database->anchor_filename, NULL))
     {
+      char error_buffer[256];
+      ERR_error_string_n (ERR_get_error (), error_buffer, sizeof (error_buffer));
       g_set_error (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
                    _("Failed to populate trust list from %s: %s"),
                    file_database->anchor_filename,
-                   ERR_error_string (ERR_get_error (), NULL));
+                   error_buffer);
       return FALSE;
     }
 

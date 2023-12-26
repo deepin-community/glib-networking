@@ -24,6 +24,7 @@
  * Author: Stef Walter <stefw@collabora.co.uk>
  */
 
+#include "config.h"
 #include "certificate.h"
 
 #include <gio/gio.h>
@@ -610,13 +611,17 @@ test_verify_certificate_bad_combo (TestVerify      *test,
    * - Use unrelated cert as CA
    * - Use wrong identity.
    * - Use expired certificate.
+   *
+   * Once upon a time, we might have asserted to see that all of these errors
+   * are set. But this is impossible to do correctly, so nowadays we only
+   * guarantee that at least one error will be set. See glib-networking#179 and
+   * glib!2214 for rationale.
    */
 
   identity = g_network_address_new ("other.example.com", 80);
 
   errors = g_tls_certificate_verify (cert, identity, cacert);
-  g_assert_cmpuint (errors, ==, G_TLS_CERTIFICATE_UNKNOWN_CA |
-                    G_TLS_CERTIFICATE_BAD_IDENTITY | G_TLS_CERTIFICATE_EXPIRED);
+  g_assert_cmpuint (errors, !=, 0);
 
   g_object_unref (cert);
   g_object_unref (cacert);
@@ -672,6 +677,12 @@ test_certificate_not_valid_before (void)
   g_object_unref (cert);
 }
 
+/* On 32-bit, GNUTLS caps expiry times at 2037-12-31 23:23:23 to avoid
+ * overflowing time_t. Hopefully by 2037, either 32-bit will finally have
+ * died out, or GNUTLS will rethink its approach to
+ * https://gitlab.com/gnutls/gnutls/-/issues/370 */
+#define GNUTLS_32_BIT_NOT_VALID_AFTER_MAX 2145914603
+
 static void
 test_certificate_not_valid_after (void)
 {
@@ -686,7 +697,16 @@ test_certificate_not_valid_after (void)
   actual = g_tls_certificate_get_not_valid_after (cert);
   g_assert_nonnull (actual);
   actual_str = g_date_time_format_iso8601 (actual);
+
+#if SIZEOF_TIME_T <= 4
+  if (g_date_time_to_unix (actual) == GNUTLS_32_BIT_NOT_VALID_AFTER_MAX)
+    g_test_incomplete ("not-valid-after date not representable on 32-bit");
+  else
+    g_assert_cmpstr (actual_str, ==, EXPECTED_NOT_VALID_AFTER);
+#else
   g_assert_cmpstr (actual_str, ==, EXPECTED_NOT_VALID_AFTER);
+#endif
+
   g_free (actual_str);
   g_date_time_unref (actual);
   g_object_unref (cert);
@@ -774,11 +794,125 @@ test_certificate_ip_addresses (void)
   g_object_unref (cert);
 }
 
+static GByteArray *
+load_bytes_for_test_file (const char *filename)
+{
+  GFile *file = g_file_new_for_path (tls_test_file_path (filename));
+  GBytes *bytes = g_file_load_bytes (file, NULL, NULL, NULL);
+
+  g_assert_nonnull (bytes);
+  g_object_unref (file);
+  return g_bytes_unref_to_array (bytes);
+}
+
+static void
+assert_cert_contains_cert_and_key (GTlsCertificate *certificate)
+{
+  char *cert_pem, *key_pem;
+
+  g_object_get (certificate,
+                "certificate-pem", &cert_pem,
+                "private-key-pem", &key_pem,
+                NULL);
+
+  g_assert_nonnull (cert_pem);
+  g_assert_nonnull (key_pem);
+
+  g_free (cert_pem);
+  g_free (key_pem);
+}
+
+static void
+assert_equals_original_cert (GTlsCertificate *cert)
+{
+  GTlsCertificate *original_cert = g_tls_certificate_new_from_file (tls_test_file_path ("client-and-key.pem"), NULL);
+  g_assert_nonnull (original_cert);
+  g_assert_true (g_tls_certificate_is_same (original_cert, cert));
+  g_object_unref (original_cert);
+}
+
+static void
+test_certificate_pkcs12_basic (void)
+{
+  GTlsCertificate *cert;
+  GByteArray *pkcs12_data;
+  GError *error = NULL;
+
+  pkcs12_data = load_bytes_for_test_file ("client-and-key.p12");
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_data->data, pkcs12_data->len, NULL, &error);
+
+  g_assert_no_error (error);
+  g_assert_nonnull (cert);
+  assert_cert_contains_cert_and_key (cert);
+  assert_equals_original_cert (cert);
+
+  g_byte_array_unref (pkcs12_data);
+  g_object_unref (cert);
+}
+
+static void
+test_certificate_pkcs12_password (void)
+{
+  GTlsCertificate *cert;
+  GByteArray *pkcs12_data;
+  GError *error = NULL;
+
+  pkcs12_data = load_bytes_for_test_file ("client-and-key-password.p12");
+
+  /* Without a password it fails. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_data->data, pkcs12_data->len, NULL, &error);
+  g_assert_error (error, G_TLS_ERROR, G_TLS_ERROR_BAD_CERTIFICATE_PASSWORD);
+  g_clear_error (&error);
+
+  /* With the wrong password it fails. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_data->data, pkcs12_data->len, "oajfo", &error);
+  g_assert_error (error, G_TLS_ERROR, G_TLS_ERROR_BAD_CERTIFICATE_PASSWORD);
+  g_clear_error (&error);
+
+  /* With the correct password it succeeds. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_data->data, pkcs12_data->len, "1234", &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (cert);
+  assert_cert_contains_cert_and_key (cert);
+  assert_equals_original_cert (cert);
+  g_object_unref (cert);
+  g_byte_array_unref (pkcs12_data);
+}
+
+static void
+test_certificate_pkcs12_encrypted (void)
+{
+  GTlsCertificate *cert;
+  GByteArray *pkcs12_enc_data;
+  GError *error = NULL;
+
+  pkcs12_enc_data = load_bytes_for_test_file ("client-and-key-password-enckey.p12");
+
+  /* Without a password it fails. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_enc_data->data, pkcs12_enc_data->len, NULL, &error);
+  g_assert_error (error, G_TLS_ERROR, G_TLS_ERROR_BAD_CERTIFICATE_PASSWORD);
+  g_clear_error (&error);
+
+  /* With the wrong password it fails. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_enc_data->data, pkcs12_enc_data->len, "oajfo", &error);
+  g_assert_error (error, G_TLS_ERROR, G_TLS_ERROR_BAD_CERTIFICATE_PASSWORD);
+  g_clear_error (&error);
+
+  /* With the correct password it succeeds. */
+  cert = g_tls_certificate_new_from_pkcs12 (pkcs12_enc_data->data, pkcs12_enc_data->len, "1234", &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (cert);
+  assert_cert_contains_cert_and_key (cert);
+  assert_equals_original_cert (cert);
+  g_object_unref (cert);
+  g_byte_array_unref (pkcs12_enc_data);
+}
+
 int
 main (int   argc,
       char *argv[])
 {
-#ifdef BACKEND_IS_GNUTLS
+#if defined(BACKEND_IS_GNUTLS) && HAVE_GNUTLS_PKCS11
   char *module_path;
 #endif
 
@@ -788,7 +922,7 @@ main (int   argc,
   g_setenv ("GIO_USE_TLS", BACKEND, TRUE);
   g_assert_cmpint (g_ascii_strcasecmp (G_OBJECT_TYPE_NAME (g_tls_backend_get_default ()), "GTlsBackend" BACKEND), ==, 0);
 
-#ifdef BACKEND_IS_GNUTLS
+#if defined(BACKEND_IS_GNUTLS) && HAVE_GNUTLS_PKCS11
   module_path = g_test_build_filename (G_TEST_BUILT, "mock-pkcs11.so", NULL);
   g_assert_true (g_file_test (module_path, G_FILE_TEST_EXISTS));
 
@@ -809,12 +943,14 @@ main (int   argc,
               setup_certificate, test_create_certificate_with_issuer, teardown_certificate);
   g_test_add ("/tls/" BACKEND "/certificate/create-with-garbage-input", TestCertificate, NULL,
               setup_certificate, test_create_certificate_with_garbage_input, teardown_certificate);
-  g_test_add ("/tls/" BACKEND "/certificate/pkcs11", TestCertificate, NULL,
-              setup_certificate, test_create_certificate_pkcs11, teardown_certificate);
   g_test_add ("/tls/" BACKEND "/certificate/private-key", TestCertificate, NULL,
               setup_certificate, test_private_key, teardown_certificate);
+#if HAVE_GNUTLS_PKCS11
+  g_test_add ("/tls/" BACKEND "/certificate/pkcs11", TestCertificate, NULL,
+              setup_certificate, test_create_certificate_pkcs11, teardown_certificate);
   g_test_add ("/tls/" BACKEND "/certificate/private-key-pkcs11", TestCertificate, NULL,
               setup_certificate, test_private_key_pkcs11, teardown_certificate);
+#endif
 
   g_test_add_func ("/tls/" BACKEND "/certificate/create-chain", test_create_certificate_chain);
   g_test_add_func ("/tls/" BACKEND "/certificate/create-no-chain", test_create_certificate_no_chain);
@@ -842,6 +978,10 @@ main (int   argc,
   g_test_add_func ("/tls/" BACKEND "/certificate/issuer-name", test_certificate_issuer_name);
   g_test_add_func ("/tls/" BACKEND "/certificate/dns-names", test_certificate_dns_names);
   g_test_add_func ("/tls/" BACKEND "/certificate/ip-addresses", test_certificate_ip_addresses);
+
+  g_test_add_func ("/tls/" BACKEND "/certificate/pkcs12/basic", test_certificate_pkcs12_basic);
+  g_test_add_func ("/tls/" BACKEND "/certificate/pkcs12/password", test_certificate_pkcs12_password);
+  g_test_add_func ("/tls/" BACKEND "/certificate/pkcs12/encrypted", test_certificate_pkcs12_encrypted);
 
   return g_test_run();
 }

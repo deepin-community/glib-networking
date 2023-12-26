@@ -6,17 +6,17 @@ Source: glib-networking
 Section: libs
 Priority: optional
 Maintainer: Debian GNOME Maintainers <pkg-gnome-maintainers@lists.alioth.debian.org>
-Uploaders: Iain Lane <laney@debian.org>, Jeremy Bicha <jbicha@debian.org>
+Uploaders: Iain Lane <laney@debian.org>, Jeremy Bícha <jbicha@ubuntu.com>
 Build-Depends: debhelper-compat (= 13),
                dh-sequence-gnome,
-               meson (>= 0.47.0),
-               libglib2.0-dev (>= 2.69.0),
-               libgnutls28-dev (>= 3.7.2),
-               libproxy-dev (>= 0.4),
+               meson (>= 0.60.0),
+               libglib2.0-dev (>= 2.73.3),
+               libgnutls28-dev (>= 3.7.4),
+               libproxy-dev (>= 0.4.16),
                gsettings-desktop-schemas-dev,
                ca-certificates
 Rules-Requires-Root: no
-Standards-Version: 4.6.0
+Standards-Version: 4.6.2
 Vcs-Browser: https://salsa.debian.org/gnome-team/glib-networking
 Vcs-Git: https://salsa.debian.org/gnome-team/glib-networking.git
 
@@ -29,8 +29,6 @@ Depends: ${misc:Depends},
          glib-networking-services (<< ${source:Version}.1~),
          glib-networking-common (>= ${source:Version}),
          gsettings-desktop-schemas
-Breaks: balsa (<< 2.6.0-2ubuntu0.1),
-        libsoup2.4-tests (<< 2.71.1-1~),
 Description: network-related giomodules for GLib
  This package contains various network related extensions for the GIO
  library.
