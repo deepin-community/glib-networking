@@ -1,3 +1,135 @@
+glib-networking (2.78.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Fri, 15 Sep 2023 14:13:20 -0400
+
+glib-networking (2.76.1-2) unstable; urgency=medium
+
+  * d/rules, d/meson/no-exe-wrapper.ini: Work around FTBFS on mips64el.
+    Mitigates: #1041499
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Fri, 04 Aug 2023 13:11:34 -0400
+
+glib-networking (2.76.1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Drop obsolete Breaks
+  * Release to unstable
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Sun, 30 Jul 2023 10:11:17 +0300
+
+glib-networking (2.76.0-1) experimental; urgency=medium
+
+  * New upstream release
+  * Drop patch: applied in new release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 27 Mar 2023 08:54:47 -0400
+
+glib-networking (2.76~beta-1) experimental; urgency=medium
+
+  [ Jeremy Bicha ]
+  * New upstream release
+  * Drop tls patch applied in new release
+  * debian/rules: remove unnecessary configure options
+
+  [ Simon McVittie ]
+  * d/rules: Increase arbitrary test timeouts by a factor of 3
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 13 Feb 2023 09:50:33 -0500
+
+glib-networking (2.74.0-4) unstable; urgency=medium
+
+  * Team upload
+  * d/p/proxy-Use-environment-libproxy-as-the-as-installed-test-f.patch:
+    Add proposed patch to resolve autopkgtest regression now that the
+    environment proxy module is disabled (Closes: #1031166)
+
+ -- Simon McVittie <smcv@debian.org>  Sun, 12 Feb 2023 17:49:53 +0000
+
+glib-networking (2.74.0-3) unstable; urgency=medium
+
+  * Disable environment proxy: it's unused & upstream recommends disabling it
+  * Update standards version to 4.6.2, no changes needed
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 10 Feb 2023 19:04:34 -0500
+
+glib-networking (2.74.0-2) unstable; urgency=medium
+
+  [ Adrian Bunk ]
+  * Cherry-pick patch to fix build tests with gnutls28 3.78 (Closes: #1022376)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sun, 11 Dec 2022 12:35:23 -0500
+
+glib-networking (2.74.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 15 Sep 2022 14:02:46 -0400
+
+glib-networking (2.74~rc-1) unstable; urgency=medium
+
+  * New upstream release
+  * debian/control.in: Bump minimum meson to 0.60.0
+  * Drop all patches: applied in new release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 01 Sep 2022 15:11:18 -0400
+
+glib-networking (2.74~beta-2) unstable; urgency=medium
+
+  * Cherry-pick 2 patches to fix failing autopkgtests (LP: #1988062)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 29 Aug 2022 17:19:47 -0400
+
+glib-networking (2.74~beta-1) unstable; urgency=medium
+
+  * New upstream release
+  * debian/control.in: Bump minimum glib2.0, gnutls, libproxy, meson
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 24 Aug 2022 12:15:54 -0400
+
+glib-networking (2.72.2-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 05 Aug 2022 18:25:24 -0400
+
+glib-networking (2.72.1-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+
+ -- Shannon Brady <duckydreams@gmail.com>  Mon, 18 Jul 2022 18:32:41 +0100
+
+glib-networking (2.72.0-1) unstable; urgency=medium
+
+  * New upstream release
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Tue, 22 Mar 2022 14:54:01 -0400
+
+glib-networking (2.72~beta-1) experimental; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bicha <jeremy.bicha@canonical.com>  Mon, 14 Feb 2022 08:32:27 -0500
+
+glib-networking (2.72~alpha-1) experimental; urgency=medium
+
+  * Team upload
+  * d/watch: Accept development versions
+  * New upstream development release
+
+ -- Simon McVittie <smcv@debian.org>  Thu, 27 Jan 2022 16:41:41 +0000
+
+glib-networking (2.70.1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Drop patch: applied in new release
+  * debian/rules: Drop unneeded -Wl,--as-needed
+
+ -- Jeremy Bicha <jbicha@debian.org>  Mon, 06 Dec 2021 20:32:57 -0500
+
 glib-networking (2.70.0-1) unstable; urgency=medium
 
   * New upstream release

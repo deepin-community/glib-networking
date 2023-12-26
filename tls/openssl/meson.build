@@ -27,7 +27,13 @@ if ['darwin', 'ios'].contains(host_system)
   deps += [
     security_dep,
   ]
+elif ['windows'].contains(host_system)
+  deps += [
+    crypt32_dep,
+  ]
 endif
+
+giomodules += 'gioopenssl'
 
 module = shared_module(
   'gioopenssl',
@@ -37,18 +43,25 @@ module = shared_module(
   link_args: module_ldflags,
   link_depends: symbol_map,
   name_suffix: module_suffix,
-  install: true,
+  install: build_shared,
   install_dir: gio_module_dir,
 )
 
-if get_option('static_modules')
-  # link_whole is a workaround for a meson bug
-  # https://github.com/mesonbuild/meson/pull/3939
-  static_library('gioopenssl',
-    objects: module.extract_all_objects(),
+if build_static
+  gioopenssl_lib = static_library('gioopenssl',
+    objects: module.extract_all_objects(recursive: true),
+    dependencies: deps,
     install: true,
     install_dir: gio_module_dir,
-    link_whole: [tlsbase]
   )
   pkg.generate(module)
+
+  gioopenssl_dep = declare_dependency(link_with: gioopenssl_lib)
+  meson.override_dependency('gioopenssl', gioopenssl_dep)
+endif
+
+if meson.version().version_compare('>=0.58')
+  env = environment()
+  env.prepend('GIO_EXTRA_MODULES', meson.current_build_dir())
+  meson.add_devenv(env)
 endif

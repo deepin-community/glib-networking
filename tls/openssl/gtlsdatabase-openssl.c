@@ -31,8 +31,18 @@
 #include <glib/gi18n-lib.h>
 #include "openssl-include.h"
 
+/*
+ * SecTrustCopyAnchorCertificates is only available on macOS, so we check for
+ * SEC_OS_OSX: https://github.com/Apple-FOSS-Mirror/Security/blob/master/base/SecBase.h
+ */
 #ifdef __APPLE__
 #include <Security/Security.h>
+#else
+#define SEC_OS_OSX 0
+#endif
+
+#ifdef G_OS_WIN32
+#include <wincrypt.h>
 #endif
 
 typedef struct
@@ -78,34 +88,6 @@ g_tls_database_openssl_init (GTlsDatabaseOpenssl *self)
   priv = g_tls_database_openssl_get_instance_private (self);
 
   g_mutex_init (&priv->mutex);
-}
-
-static GTlsCertificateFlags
-double_check_before_after_dates (GTlsCertificateOpenssl *chain)
-{
-  GTlsCertificateFlags gtls_flags = 0;
-  X509 *cert;
-
-  while (chain)
-    {
-      ASN1_TIME *not_before;
-      ASN1_TIME *not_after;
-
-      cert = g_tls_certificate_openssl_get_cert (chain);
-      not_before = X509_get_notBefore (cert);
-      not_after = X509_get_notAfter (cert);
-
-      if (X509_cmp_current_time (not_before) > 0)
-        gtls_flags |= G_TLS_CERTIFICATE_NOT_ACTIVATED;
-
-      if (X509_cmp_current_time (not_after) < 0)
-        gtls_flags |= G_TLS_CERTIFICATE_EXPIRED;
-
-      chain = G_TLS_CERTIFICATE_OPENSSL (g_tls_certificate_get_issuer
-                                         (G_TLS_CERTIFICATE (chain)));
-    }
-
-  return gtls_flags;
 }
 
 static STACK_OF(X509) *
@@ -168,11 +150,6 @@ g_tls_database_openssl_verify_chain (GTlsDatabase             *database,
   if (g_cancellable_set_error_if_cancelled (cancellable, error))
     return G_TLS_CERTIFICATE_GENERIC_ERROR;
 
-  /* We have to check these ourselves since openssl
-   * does not give us flags and UNKNOWN_CA will take priority.
-   */
-  result |= double_check_before_after_dates (G_TLS_CERTIFICATE_OPENSSL (chain));
-
   if (identity)
     result |= g_tls_certificate_openssl_verify_identity (G_TLS_CERTIFICATE_OPENSSL (chain),
                                                          identity);
@@ -180,58 +157,242 @@ g_tls_database_openssl_verify_chain (GTlsDatabase             *database,
   return result;
 }
 
+#if SEC_OS_OSX
+static gboolean
+is_certificate_trusted (SecCertificateRef       *cert,
+                        SecTrustSettingsDomain   domain,
+                        GError                 **error)
+{
+  CFArrayRef cert_trust_settings;
+  OSStatus ret;
+  CFIndex i;
+
+  ret = SecTrustSettingsCopyTrustSettings (*cert, domain, &cert_trust_settings);
+  if (ret != errSecSuccess)
+    {
+      g_set_error_literal (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
+                           _("Could not get trust settings for certificate"));
+      return FALSE;
+    }
+
+  for (i = 0; i < CFArrayGetCount (cert_trust_settings); i++)
+    {
+      CFDictionaryRef trust_settings;
+      CFNumberRef trust_setting_number;
+      CFStringRef policy_name;
+
+      /* Ignore trust settings which are not SSL policies. */
+      trust_settings = (CFDictionaryRef)CFArrayGetValueAtIndex (cert_trust_settings, i);
+      if (CFDictionaryGetValueIfPresent (trust_settings, kSecTrustSettingsPolicyString, 
+                                         (const void **)&policy_name) &&
+          CFStringCompare (policy_name, CFSTR ("sslServer"), 0) != kCFCompareEqualTo)
+        {
+          continue;
+        }
+
+      if (CFDictionaryGetValueIfPresent (trust_settings, kSecTrustSettingsResult, 
+                                         (const void **)&trust_setting_number))
+        {
+          SecTrustSettingsResult trustSettingResult;
+
+          if (trust_setting_number == NULL)
+            {
+              CFRelease (cert_trust_settings);
+              return TRUE;
+            }
+
+          CFNumberGetValue (trust_setting_number, kCFNumberIntType, &trustSettingResult);
+          /* kSecTrustSettingsResultUnspecified means neither trusted nor distrusted.  
+           * kSecTrustSettingsResultInvalid should not be a possible value for trustSettingResult.
+           * 
+           * Only for kSecTrustSettingsResultDeny should the certificate not be trusted.
+           */
+          if (trustSettingResult != kSecTrustSettingsResultUnspecified && 
+              trustSettingResult != kSecTrustSettingsResultInvalid)
+            {
+              CFRelease (cert_trust_settings);
+              return trustSettingResult != kSecTrustSettingsResultDeny;
+            }
+        }
+     }
+
+  CFRelease (cert_trust_settings);
+
+  /* We only reach here if the trust settings array is empty or trust setting parameter for 
+   * a certificate is NULL. The documentation state that we should trust these certificates
+   * as kSecTrustSettingsResultTrustRoot as only root certificates can have have that value.
+   * 
+   * https://developer.apple.com/documentation/security/1400261-sectrustsettingscopytrustsetting?language=objc
+   * 
+   * If it is not a root certificate then we trust it as root because they are retrieved
+   * from the trust domains.
+   */
+  return TRUE;
+}
+
+static gboolean
+populate_store (X509_STORE  *store,
+                GError     **error)
+{
+  SecTrustSettingsDomain domains[] = { kSecTrustSettingsDomainUser, 
+                                       kSecTrustSettingsDomainAdmin, 
+                                       kSecTrustSettingsDomainSystem };
+  GHashTable *trusted_certs = g_hash_table_new_full (g_bytes_hash, g_bytes_equal, 
+                                                     (GDestroyNotify)g_bytes_unref, NULL);
+  gboolean result = FALSE;
+
+  for (int i = 0; i < G_N_ELEMENTS (domains); i++)
+   {
+      SecTrustSettingsDomain domain = domains[i];
+      CFArrayRef domain_certs;
+      OSStatus ret;
+      CFIndex j;
+
+      ret = SecTrustSettingsCopyCertificates (domain, &domain_certs);
+      if (ret == errSecNoTrustSettings)
+        {
+          g_debug ("Domain %d was skipped as no trust settings were found", domain);
+          continue;
+        }
+        
+      if (ret != errSecSuccess)
+        {
+          g_set_error_literal (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
+                               _("Could not retrieve certificates"));
+          goto out;
+        }
+
+      for (j = 0; j < CFArrayGetCount (domain_certs); j++)
+        {
+          SecCertificateRef cert;
+          CFDataRef data;
+          X509 *cert_x509;
+          GBytes *cert_bytes;
+          const unsigned char *pdata;
+
+          cert = (SecCertificateRef)CFArrayGetValueAtIndex (domain_certs, j);
+          if (!is_certificate_trusted (&cert, domain, error))
+            {
+              continue;
+            }
+
+          data = SecCertificateCopyData (cert);
+          if (data == NULL)
+            {
+              continue;
+            }
+
+          pdata = (const unsigned char *)CFDataGetBytePtr (data);
+          cert_x509 = d2i_X509 (NULL, &pdata, CFDataGetLength (data));
+          if (cert_x509 == NULL)
+            {
+              CFRelease (data);
+              continue;
+            }
+
+          cert_bytes = g_bytes_new (pdata, CFDataGetLength (data));
+          if (cert_bytes == NULL)
+            {
+              goto next;
+            }
+
+          if (!g_hash_table_contains (trusted_certs, cert_bytes))
+            {
+              g_hash_table_add (trusted_certs, g_bytes_ref (cert_bytes));
+              X509_STORE_add_cert (store, cert_x509);
+            }
+
+          g_bytes_unref (cert_bytes);
+
+        next:
+          X509_free (cert_x509);
+          CFRelease (data);
+        }
+
+      CFRelease (domain_certs);
+    }
+
+  result = TRUE;
+
+out:  
+  g_hash_table_unref (trusted_certs);
+
+  return result;
+}
+
+#elif defined(G_OS_WIN32)
+static gboolean
+add_certs_from_store (const gunichar2 *source_cert_store_name,
+                      X509_STORE      *store)
+{
+  HANDLE store_handle;
+  PCCERT_CONTEXT cert_context = NULL;
+
+  store_handle = CertOpenSystemStoreW (0, source_cert_store_name);
+  if (store_handle == NULL)
+    return FALSE;
+
+  while (cert_context = CertEnumCertificatesInStore (store_handle, cert_context))
+    {
+      X509 *x;
+      const unsigned char *pdata;
+
+      pdata = (const unsigned char *)cert_context->pbCertEncoded;
+
+      x = d2i_X509 (NULL, &pdata, cert_context->cbCertEncoded);
+      if (x)
+        X509_STORE_add_cert (store, x);
+    }
+
+  CertCloseStore (store_handle, 0);
+  return TRUE;
+}
+
+static gboolean
+populate_store (X509_STORE  *store,
+                GError     **error)
+{
+  if (!add_certs_from_store (L"ROOT", store))
+    {
+      g_set_error_literal (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
+                           _("Could not get root certificate store"));
+      return FALSE;
+    }
+
+  if (!add_certs_from_store (L"CA", store))
+    {
+      g_set_error_literal (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
+                           _("Could not get CA certificate store"));
+      return FALSE;
+    }
+
+  return TRUE;
+}
+#else
+static gboolean
+populate_store (X509_STORE  *store,
+                GError     **error)
+{
+  if (!X509_STORE_set_default_paths (store))
+    {
+      char error_buffer[256];
+      ERR_error_string_n (ERR_get_error (), error_buffer, sizeof (error_buffer));
+      g_set_error (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
+                   _("Failed to load system trust store: %s"),
+                   error_buffer);
+      return FALSE;
+    }
+
+  return TRUE;
+}
+#endif
+
 static gboolean
 g_tls_database_openssl_populate_trust_list (GTlsDatabaseOpenssl  *self,
                                             X509_STORE           *store,
                                             GError              **error)
 {
-#ifdef __APPLE__
-  CFArrayRef anchors;
-  OSStatus ret;
-  CFIndex i;
-
-  ret = SecTrustCopyAnchorCertificates (&anchors);
-  if (ret != errSecSuccess)
-    {
-      g_set_error_literal (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
-                           _("Could not get trusted anchors from Keychain"));
-      return FALSE;
-    }
-
-  for (i = 0; i < CFArrayGetCount (anchors); i++)
-    {
-      SecCertificateRef cert;
-      CFDataRef data;
-
-      cert = (SecCertificateRef)CFArrayGetValueAtIndex (anchors, i);
-      data = SecCertificateCopyData (cert);
-      if (data)
-        {
-          X509 *x;
-          const unsigned char *pdata;
-
-          pdata = (const unsigned char *)CFDataGetBytePtr (data);
-
-          x = d2i_X509 (NULL, &pdata, CFDataGetLength (data));
-          if (x)
-            X509_STORE_add_cert (store, x);
-
-          CFRelease (data);
-        }
-    }
-
-  CFRelease (anchors);
-#endif
-
-  if (!X509_STORE_set_default_paths (store))
-    {
-      g_set_error (error, G_TLS_ERROR, G_TLS_ERROR_MISC,
-                   _("Failed to load system trust store: %s"),
-                   ERR_error_string (ERR_get_error (), NULL));
-      return FALSE;
-    }
-
-  return TRUE;
+  return populate_store (store, error);
 }
 
 static void
@@ -313,19 +474,66 @@ g_tls_database_openssl_new (GError **error)
   return g_initable_new (G_TYPE_TLS_DATABASE_OPENSSL, NULL, error, NULL);
 }
 
+static gboolean
+check_for_ocsp_must_staple (X509 *cert)
+{
+  int idx = -1; /* We ignore the return of this as we only expect one extension. */
+  STACK_OF(ASN1_INTEGER) *features = X509_get_ext_d2i (cert, NID_tlsfeature, NULL, &idx);
+
+  if (!features)
+    return FALSE;
+
+  for (guint i = 0; i < sk_ASN1_INTEGER_num (features); i++)
+    {
+      const long feature_id = ASN1_INTEGER_get (sk_ASN1_INTEGER_value (features, i));
+      if (feature_id == 5 || feature_id == 17) /* status_request, status_request_v2 */
+        {
+          sk_ASN1_INTEGER_pop_free (features, ASN1_INTEGER_free);
+          return TRUE;
+        }
+    }
+
+  sk_ASN1_INTEGER_pop_free (features, ASN1_INTEGER_free);
+  return FALSE;
+}
+
 GTlsCertificateFlags
 g_tls_database_openssl_verify_ocsp_response (GTlsDatabaseOpenssl *self,
                                              GTlsCertificate     *chain,
                                              OCSP_RESPONSE       *resp)
 {
   GTlsCertificateFlags errors = 0;
-#if (OPENSSL_VERSION_NUMBER >= 0x0090808fL) && !defined(OPENSSL_NO_TLSEXT) && \
-  !defined(OPENSSL_NO_OCSP)
   GTlsDatabaseOpensslPrivate *priv;
   STACK_OF(X509) *chain_openssl = NULL;
   OCSP_BASICRESP *basic_resp = NULL;
   int ocsp_status = 0;
   int i;
+
+  chain_openssl = convert_certificate_chain_to_openssl (G_TLS_CERTIFICATE_OPENSSL (chain));
+  priv = g_tls_database_openssl_get_instance_private (self);
+  if ((chain_openssl == NULL) ||
+      (priv->store == NULL))
+    {
+      errors = G_TLS_CERTIFICATE_GENERIC_ERROR;
+      goto end;
+    }
+
+  /* OpenSSL doesn't provide an API to determine if the chain requires
+   * an OCSP response (known as Must-Staple) using the status_request
+   * X509v3 extension. We also seem to have no way of correctly knowing the
+   * final certificate path that OpenSSL will internally use, so can't do it
+   * ourselves. So for now we will check only the server certificate to see if
+   * it sets Must-Staple. This is inconsistent with GnuTLS's behavior, but it
+   * seems to be the best we can do. Checking *every* certificate for Must-
+   * Staple would be wrong because we don't want to check certificates that
+   * OpenSSL does not actually use as part of its final certification path.
+   */
+  if (resp == NULL)
+    {
+      if (check_for_ocsp_must_staple (sk_X509_value (chain_openssl, 0)))
+        errors = G_TLS_CERTIFICATE_GENERIC_ERROR;
+      goto end;
+    }
 
   ocsp_status = OCSP_response_status (resp);
   if (ocsp_status != OCSP_RESPONSE_STATUS_SUCCESSFUL)
@@ -336,15 +544,6 @@ g_tls_database_openssl_verify_ocsp_response (GTlsDatabaseOpenssl *self,
 
   basic_resp = OCSP_response_get1_basic (resp);
   if (basic_resp == NULL)
-    {
-      errors = G_TLS_CERTIFICATE_GENERIC_ERROR;
-      goto end;
-    }
-
-  chain_openssl = convert_certificate_chain_to_openssl (G_TLS_CERTIFICATE_OPENSSL (chain));
-  priv = g_tls_database_openssl_get_instance_private (self);
-  if ((chain_openssl == NULL) ||
-      (priv->store == NULL))
     {
       errors = G_TLS_CERTIFICATE_GENERIC_ERROR;
       goto end;
@@ -405,6 +604,5 @@ end:
   if (resp)
     OCSP_RESPONSE_free (resp);
 
-#endif
   return errors;
 }
