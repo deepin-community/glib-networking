@@ -27,3 +27,5 @@ endif
 # Don't strip translations from the installed tests; makes them environment dependent.
 override_dh_translations:
 	dh_translations -Xinstalled-tests
+
+override_dh_gnome_clean:

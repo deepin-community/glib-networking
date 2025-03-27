@@ -1,3 +1,39 @@
+glib-networking (2.80.1-1) unstable; urgency=medium
+
+  * New upstream release
+  * Mark ca-certificates as only required for build tests
+  * Bump Standards Version to 4.7.0
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 08 Jan 2025 14:16:30 -0900
+
+glib-networking (2.80.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 27 Mar 2024 18:59:03 -0400
+
+glib-networking (2.80~rc-1) unstable; urgency=medium
+
+  * New upstream release
+  * Drop remaining patch: applied in new release
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 06 Mar 2024 16:30:36 -0500
+
+glib-networking (2.80~alpha-2) unstable; urgency=medium
+
+  * Set minimum libproxy to 0.5 because of ifdef'd code.
+    Thanks to Sebastien Bacher
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 27 Feb 2024 07:51:34 -0500
+
+glib-networking (2.80~alpha-1) unstable; urgency=medium
+
+  * New upstream release
+  * Cherry-pick a patch that will be included in the next release
+  * Stop using debian/control.in and dh_gnome_clean
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Fri, 23 Feb 2024 15:39:24 -0500
+
 glib-networking (2.78.0-1) unstable; urgency=medium
 
   * New upstream release
