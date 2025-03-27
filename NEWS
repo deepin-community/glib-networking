@@ -1,3 +1,33 @@
+2.80.1 - January 8, 2025
+========================
+
+ - OpenSSL: fix crash in complete_handshake (!251, Dario Saccavino)
+ - OpenSSL: fix invalid free in openssl_get_binding_tls_server_end_point() (!255)
+ - TLS test should handle G_IO_ERROR_WOULD_BLOCK (!253, Richard Purdie and Alexander Kanavin)
+ - Updated translations
+
+2.80.0 - March 14, 2024
+=======================
+
+- Mark plugin functions as exports on Windows (!250, Amyspark)
+- Updated translations
+
+2.80.rc - February 29, 2024
+===========================
+
+- GnuTLS: fix improper use of IP address in SNI extension (!247, MARTINSONS Frederic)
+- GnuTLS: major performance improvement: reduce unnecessary trust list creation (!249)
+- OpenSSL: properly handle BIO_CTRL_EOF (!248)
+- Updated translations
+
+2.80.alpha - January 5, 2024
+============================
+
+- GnuTLS: Add warning when system has no trusted certificates (!243)
+- OpenSSL: Fix bug when populating trust store (!244, Alessandro Bono)
+- Fix license on dtls-connection.c test (!245, David King)
+- Updated translations
+
 2.78.0 - September 14, 2023
 ===========================
 
