@@ -1,3 +1,12 @@
+glib-networking (2.80.1-1deepin1) unstable; urgency=medium
+
+  * Fix CVE-2025-60019: Check return values of BIO_new() in OpenSSL
+    backend   - Backport from upstream commit
+    70df675dd4f5e4a593b2f95406c1aac031aa8bc7   - Prevents NULL pointer
+    dereferences when memory allocation fails   - Closes: CVE-2025-60019
+
+ -- hudeng <hudeng@deepin.org>  Mon, 09 Feb 2026 18:11:55 +0800
+
 glib-networking (2.80.1-1) unstable; urgency=medium
 
   * New upstream release
