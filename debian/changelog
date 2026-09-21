@@ -1,3 +1,12 @@
+glib-networking (2.80.1-1deepin1) unstable; urgency=medium
+
+  * fix(cve): CVE-2025-60018 (medium) - [PATCH] openssl: properly check
+    return value when writing to BIO objects   Upstream:
+    https://gitlab.gnome.org/GNOME/glib-networking/-
+    /commit/4dd540505d40babe488404f3174ec39f49a84485
+
+ -- deepin-ci-robot <packages@deepin.org>  Mon, 21 Sep 2026 11:40:35 +0800
+
 glib-networking (2.80.1-1) unstable; urgency=medium
 
   * New upstream release
