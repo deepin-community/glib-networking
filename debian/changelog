@@ -4,6 +4,10 @@ glib-networking (2.80.1-1deepin1) unstable; urgency=medium
     return value when writing to BIO objects   Upstream:
     https://gitlab.gnome.org/GNOME/glib-networking/-
     /commit/4dd540505d40babe488404f3174ec39f49a84485
+  * fix(cve): CVE-2026-2574 (unknown) - [PATCH] openssl: fix out of
+    bounds read in accepted-cas property getter   Upstream:
+    https://gitlab.gnome.org/GNOME/glib-networking/-
+    /commit/c3c84b269165f2a312d47fa15c5cbc7f8ead7631.patch
 
  -- deepin-ci-robot <packages@deepin.org>  Mon, 21 Sep 2026 11:40:35 +0800
 
